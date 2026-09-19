@@ -46,6 +46,8 @@ class MLP(nn.Module):
         ### Later read why GeLU is being used instead of ReLU for training transformer like models?
         self.gelu = nn.GELU(approximate='tanh')
         self.c_proj = nn.Linear(4 * config.n_embd,config.n_embd)
+        self.c_proj.NANOGPT_SCALE_INIT = 1
+
     def forward(self,x):
         return self.c_proj(self.gelu(self.c_fc(x)))
 
@@ -90,7 +92,29 @@ class GPT(nn.Module):
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias = False)
 
         # Weight sharing scheme (explained in the walkthrough)
-        self.transformer.wte.weight = self.lm_head.weight    
+        self.transformer.wte.weight = self.lm_head.weight
+        
+        # init params
+        # the apply function iterates through all the modules in our NN and applies _init_weights function
+        self.apply(self._init_weights)
+
+
+    # The initialization values have been derived from OpenAI's GPT2 code
+    def _init_weights(self,module):
+        if isinstance(module, nn.Linear):
+            std = 0.02
+            # We are scaling down the initialization of the residual layers in the last Linear Transformation layers in the blocks. 
+            # We have used the flag NANOGPT_SCALE_INIT  to find the linear transformation layers.
+            if hasattr(module,'NANOGPT_SCALE_INIT'):
+                # We are getting the below value for the following reasons:
+                # 1. In GPT2's paper it is written that the linear transfomations should be scaled down to Number of layers ** -0.5
+                # 2. Since we have residual connections going in twice once in MLP and the other in MHA block that is why are taking twice the number of layers in our initialization 
+                std *= (2*self.config.n_layers) **-0.5
+
+            torch.nn.init.normal_(module.weight,mean=0.0,std=std)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight,mean=0.0,std=0.02)
+
 
     def forward(self,idx,targets = None):
         B,T = idx.shape
@@ -193,8 +217,14 @@ class DataLoaderLite:
 device = 'cpu'
 if torch.cuda.is_available():
     device = 'cuda'
-elif torch.backends.mps.is_available():
+elif hasattr(torch.backends) and torch.backends.mps.is_available():
     device = 'mps'
+
+torch.manual_seed(1337)
+if torch.backends.mps.is_available():
+    torch.mps.manual_seed(1337)
+elif torch.cuda.is_available():
+    torch.cuda.manual_seed(1337)
 
 # get a databatch
 train_loader = DataLoaderLite(B=4,T=32)

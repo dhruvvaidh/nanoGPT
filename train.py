@@ -3,7 +3,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-device = 'mps' if torch.mps.device_count() >0 else 'cpu'
+# Auto detects the device
+device = 'cpu'
+if torch.cuda.is_available():
+    device = 'cuda'
+elif torch.backends.mps.is_available():
+    device = 'mps'
 
 #---------------------------------------
 
@@ -158,7 +163,9 @@ class GPT(nn.Module):
 # -------------------------------------------------------
 num_return_sequences = 5
 max_length = 30
-model = GPT.from_pretrained('gpt2')
+#model = GPT.from_pretrained('gpt2')
+# We can still run out model, but it'll give us garbage because it hasn't been trained yet
+model = GPT(GPTConfig())
 model.eval()
 model.to(device)
 

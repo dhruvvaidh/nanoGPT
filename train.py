@@ -3,13 +3,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Auto detects the device
-device = 'cpu'
-if torch.cuda.is_available():
-    device = 'cuda'
-elif torch.backends.mps.is_available():
-    device = 'mps'
-
 #---------------------------------------
 
 class CausalSelfAttention(nn.Module):
@@ -97,17 +90,21 @@ class GPT(nn.Module):
 
     def forward(self,idx,targets = None):
         B,T = idx.shape
-        assert T<=self.config.block_size, f"Cannot forward seuence of length {T}, block_size {self.config.block_size}"
-        tok_emb = self.transformer.wte(idx).to(device)
-        pos_emb = self.transformer.wpe(torch.arange(0,T,dtype=torch.long,device=device))
+        assert T<=self.config.block_size, f"Cannot forward sequence of length {T}, block_size {self.config.block_size}"
+        tok_emb = self.transformer.wte(idx) # (B,T,n_embd)
+        pos_emb = self.transformer.wpe(torch.arange(0,T,dtype=torch.long,device=idx.device)) # T, n_embd
         x = tok_emb + pos_emb
 
         for block in self.transformer.h:
             x = block(x)
 
         x = self.transformer.ln_f(x)
-        x = self.lm_head(x)
-        return x
+        logits = self.lm_head(x) # (B,T,vocab_size)
+        loss = None
+        if targets is not None:
+            # We need to reshape the multi-dimensional tensor to a single dimension tensor(flattening the tensors) to use Cross Entropy Loss
+            loss = F.cross_entropy(logits.view(-1,logits.size(-1)),targets.view(-1))
+        return logits, loss
 
     @classmethod
     def from_pretrained(cls, model_type):
@@ -161,6 +158,26 @@ class GPT(nn.Module):
 
 
 # -------------------------------------------------------
+
+# Auto detects the device
+device = 'cpu'
+if torch.cuda.is_available():
+    device = 'cuda'
+elif torch.backends.mps.is_available():
+    device = 'mps'
+
+# get a databatch
+import tiktoken
+enc = tiktoken.get_encoding('gpt2')
+with open('datasets/tiny_shakespeare/input.txt') as f:
+    text = f.read()
+text = text[:1000]
+tokens = enc.encode(text)
+B,T = 4,32
+buf = torch.tensor(tokens[:B*T+1])
+x = buf[:-1].view(B,T).to(device)
+y = buf[1:].view(B,T).to(device)
+
 num_return_sequences = 5
 max_length = 30
 #model = GPT.from_pretrained('gpt2')
@@ -169,37 +186,47 @@ model = GPT(GPTConfig())
 model.eval()
 model.to(device)
 
-import tiktoken
-enc = tiktoken.get_encoding('gpt2')
-tokens = enc.encode("Hello, I'm a language model,")
-tokens = torch.tensor(tokens,dtype=torch.long)
-tokens = tokens.unsqueeze(0).repeat(num_return_sequences,1) # Creating 5 copies of the tokens generated above
-x = tokens.to(device)
+#optimization
+optimizer = torch.optim.AdamW(model.parameters(),lr=3e-4)
+for i in range(50):
+    optimizer.zero_grad()
+    logits, loss = model(x,y)
+    # print(f"Loss: {loss}")
+    loss.backward()
+    optimizer.step()
+    print(f"step {i}, loss: {loss.item()}")
+
+
+# enc = tiktoken.get_encoding('gpt2')
+# tokens = enc.encode("Hello, I'm a language model,")
+# tokens = torch.tensor(tokens,dtype=torch.long)
+# tokens = tokens.unsqueeze(0).repeat(num_return_sequences,1) # Creating 5 copies of the tokens generated above
+# x = tokens.to(device)
 
 # generate!
 
-torch.manual_seed(42)
-torch.mps.manual_seed(42)
-while x.size(1) < max_length:
-    # forward the model to get the logits
-    with torch.no_grad():
-        logits = model(x)
-        # We are only taking logits from the last position (because that'll contain the whole sequence)
-        logits = logits[:,-1,:]
-        # Get the predictive probabilities
-        probs = F.softmax(logits,dim=-1)
-        # Do top k samping of 50 to get the top 50 best choices
-        # We are doing top k sampling as it's the same method used by huggingface's pipelines which is used for generation
-        topk_probs, topk_indices = torch.topk(probs,50,dim=-1)
-        # select a token from the top-k probabilities (multinomial function in torch randomly draws samples from an input tensor of predictive probabilities)
-        ix = torch.multinomial(topk_probs,1)
-        # gather the corresponding indices
-        xcol = torch.gather(topk_indices,-1,ix)
-        # append to the sequence
-        x = torch.cat((x,xcol),dim=1)
+# torch.manual_seed(42)
+# torch.mps.manual_seed(42)
+# while x.size(1) < max_length:
+#     # forward the model to get the logits
+#     with torch.no_grad():
+#         logits = model(x)
+#         # We are only taking logits from the last position (because that'll contain the whole sequence)
+#         logits = logits[:,-1,:]
+#         # Get the predictive probabilities
+#         probs = F.softmax(logits,dim=-1)
+#         # Do top k samping of 50 to get the top 50 best choices
+#         # We are doing top k sampling as it's the same method used by huggingface's pipelines which is used for generation
+#         topk_probs, topk_indices = torch.topk(probs,50,dim=-1)
+#         # select a token from the top-k probabilities (multinomial function in torch randomly draws samples from an input tensor of predictive probabilities)
+#         ix = torch.multinomial(topk_probs,1)
+#         # gather the corresponding indices
+#         xcol = torch.gather(topk_indices,-1,ix)
+#         # append to the sequence
+#         x = torch.cat((x,xcol),dim=1)
 
-# print the generated text
-for i in range(num_return_sequences):
-    tokens = x[i,:max_length].tolist()
-    decoded = enc.decode(tokens)
-    print(">",decoded)
+# # print the generated text
+# for i in range(num_return_sequences):
+#     tokens = x[i,:max_length].tolist()
+#     decoded = enc.decode(tokens)
+#     print(">",decoded)

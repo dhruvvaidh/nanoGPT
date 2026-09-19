@@ -89,6 +89,9 @@ class GPT(nn.Module):
         # Final Projection - Final Clasifier layer which predicts the tokens
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias = False)
 
+        # Weight sharing scheme (explained in the walkthrough)
+        self.transformer.wte.weight = self.lm_head.weight    
+
     def forward(self,idx,targets = None):
         B,T = idx.shape
         assert T<=self.config.block_size, f"Cannot forward sequence of length {T}, block_size {self.config.block_size}"
@@ -169,7 +172,7 @@ class DataLoaderLite:
         with open('datasets/tiny_shakespeare/input.txt') as f:
             text = f.read()
         self.tokens = enc.encode(text)
-        print(f"Loaded {self.tokens} tokens")
+        print(f"Loaded {len(self.tokens)} tokens")
         print(f"1 epoch = {len(self.tokens)// (B*T)} batches")
 
         #state

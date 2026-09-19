@@ -109,7 +109,7 @@ class GPT(nn.Module):
                 # We are getting the below value for the following reasons:
                 # 1. In GPT2's paper it is written that the linear transfomations should be scaled down to Number of layers ** -0.5
                 # 2. Since we have residual connections going in twice once in MLP and the other in MHA block that is why are taking twice the number of layers in our initialization 
-                std *= (2*self.config.n_layers) **-0.5
+                std *= (2*self.config.n_layer) **-0.5
 
             torch.nn.init.normal_(module.weight,mean=0.0,std=std)
         elif isinstance(module, nn.Embedding):
@@ -217,7 +217,7 @@ class DataLoaderLite:
 device = 'cpu'
 if torch.cuda.is_available():
     device = 'cuda'
-elif hasattr(torch.backends) and torch.backends.mps.is_available():
+elif hasattr(torch.backends,'mps') and torch.backends.mps.is_available():
     device = 'mps'
 
 torch.manual_seed(1337)

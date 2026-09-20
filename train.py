@@ -248,7 +248,7 @@ model.to(device)
 # stored in a seperate object which the python interpreter doesn't reread thus making code execution optimized.
 # Advantage 2:
 # torch.compile() basically ensures that if one input is being used for calculation, that input is first stored in the HBM and then it's being used further for calculations.
-# when torch get's the overview of the code, it can decide how to optimize the communication time between the GPU chip and the HBM.
+# when torch get's the overview of the code, it can decide how to optimize the communication time between the GPU chip and the HBM. Basically we're using kernel fusion
 model = torch.compile(model)
 
 # optimization

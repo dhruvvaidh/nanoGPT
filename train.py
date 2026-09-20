@@ -262,7 +262,7 @@ model.to(device)
 model = torch.compile(model)
 
 # optimization
-optimizer = torch.optim.AdamW(model.parameters(),lr=3e-4)
+optimizer = torch.optim.AdamW(model.parameters(),lr=3e-4,betas=(0.9,0.95),eps=1e-8)
 for i in range(50):
     t0 = time.time()
     x,y = train_loader.next_batch()
@@ -277,6 +277,11 @@ for i in range(50):
         logits, loss = model(x,y)
     # print(f"Loss: {loss}")
     loss.backward()
+    # Calculating the Grad Norm and clipping the global norm to 1.0.
+    # During a bad/ unlucky batch if the loss is very high then the gradient which is going to be sent backward can be very high. 
+    # This high gradient can shock the model which results in drop in performance. 
+    # Therefore, people use this trick to set an upper bound on the norm of the model to prevent this shocking behaviour.
+    norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
     optimizer.step()
     # This function basically makes the program wait for GPU to finish all it's scheduled tasks
     torch.cuda.synchronize()
@@ -285,7 +290,7 @@ for i in range(50):
     dt = (t1-t0)*1000 # time difference in milliseconds
     # Tokens processed per second during training
     tokens_per_sec = (train_loader.B * train_loader.T)/(t1-t0)
-    print(f"step {i}, loss: {loss.item()}, dt: {dt:.2f}ms, tokens/sec: {tokens_per_sec:.2f}")
+    print(f"step {i}| loss: {loss.item()}| norm:{norm:.2f} | dt: {dt:.2f}ms| tokens/sec: {tokens_per_sec:.2f}")
 
 
 # enc = tiktoken.get_encoding('gpt2')

@@ -265,6 +265,17 @@ if torch.backends.mps.is_available():
 elif torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 
+
+# We are simulating 0.5 million batch size as mentioned in the paper using gradient accumulation
+total_batch_size = 524288 # 2**19, ~0.5M, in number of tokens
+B = 16 # micro batch size
+T = 1024 # sequence length
+assert total_batch_size % (B * T) == 0, "make sure total_batch_size is divisible by B * T * ddp_world_size"
+# No. of times gradient is getting accumulated (individual batch's gradients are added to one other) and then a single update to update the gradients of the model
+grad_accum_steps = total_batch_size // (B * T )
+print(f"total desired batch size: {total_batch_size}")
+print(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
+
 # get a databatch
 train_loader = DataLoaderLite(B=16,T=1024)
 # By default this is set to highest which basically means that even the simplest of matrix multiplications happen on float32 precision (24 mantissa bits 23 stored)
@@ -311,18 +322,25 @@ def get_lr(it):
 optimizer = model.configure_optimizers(weight_decay = 0.1, learning_rate = max_lr, device_type=device)
 for step in range(max_steps):
     t0 = time.time()
-    x,y = train_loader.next_batch()
-    x,y = x.to(device),y.to(device)
     optimizer.zero_grad()
-    # We are going to do mixed precision training here
-    # Some operations like matrix multiplication in the Linear Layers can be done with lower precision for increased performance.
-    # To faciliate certain operations to use automatic mixed precision we use torch.autocast. There is a list of operations which can be autocasted (check the docs)
-    # PyTorch documentation recommends us to only use this for training the model and loss calualation and we should leave optimzation and back propagation alone.
-    # We don't use flaot16 because if we use them we will have to scale the gradients using Gradient Scaling algos instead we're using bfloat16
-    with torch.autocast(device_type=device, dtype=torch.bfloat16):
-        logits, loss = model(x,y)
-    # print(f"Loss: {loss}")
-    loss.backward()
+    # We are performing gradient accumulation here
+    loss_accum = 0.0
+    for micro_step in range(grad_accum_steps):
+        x,y = train_loader.next_batch()
+        x,y = x.to(device),y.to(device)
+        # We are going to do mixed precision training here
+        # Some operations like matrix multiplication in the Linear Layers can be done with lower precision for increased performance.
+        # To faciliate certain operations to use automatic mixed precision we use torch.autocast. There is a list of operations which can be autocasted (check the docs)
+        # PyTorch documentation recommends us to only use this for training the model and loss calualation and we should leave optimzation and back propagation alone.
+        # We don't use flaot16 because if we use them we will have to scale the gradients using Gradient Scaling algos instead we're using bfloat16
+        with torch.autocast(device_type=device, dtype=torch.bfloat16):
+            logits, loss = model(x,y)
+        # We are normalizing the loss across multiple micro steps during gradient accumulation. 
+        # This is done because we are essentially adding the losses of all the steps and then doing back propagation which increases the gradients therefore we need to normalize them. 
+        loss = loss / grad_accum_steps
+        # print(f"Loss: {loss}")
+        loss_accum += loss.detach()
+        loss.backward()
     # Calculating the Grad Norm and clipping the global norm to 1.0.
     # During a bad/ unlucky batch if the loss is very high then the gradient which is going to be sent backward can be very high. 
     # This high gradient can shock the model which results in drop in performance. 
@@ -338,9 +356,11 @@ for step in range(max_steps):
     # torch.mps.synchronize() 
     t1 = time.time()
     dt = (t1-t0)*1000 # time difference in milliseconds
+    # Toekn processed
+    tokens_processed = train_loader.B * train_loader.T * grad_accum_steps
     # Tokens processed per second during training
-    tokens_per_sec = (train_loader.B * train_loader.T)/(t1-t0)
-    print(f"step {step:4d}| loss: {loss.item():.6f} | lr: {lr:.4f}| norm: {norm:.2f} | dt: {dt:.2f}ms| tokens/sec: {tokens_per_sec:.2f}")
+    tokens_per_sec = tokens_processed/(t1-t0)
+    print(f"step {step:4d}| loss: {loss_accum.item():.6f} | lr: {lr:.4e}| norm: {norm:.2f} | dt: {dt:.2f}ms| tokens/sec: {tokens_per_sec:.2f}")
 
 
 # enc = tiktoken.get_encoding('gpt2')

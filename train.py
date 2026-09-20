@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import tiktoken
+import time
 
 #---------------------------------------
 
@@ -208,7 +209,8 @@ class DataLoaderLite:
         x = buf[:-1].view(B,T) # inputs
         y = buf[1:].view(B,T) # targets
         self.current_position += B*T
-        if self.current_position > self.current_position+B*T+1:
+        # if loading the next batch would be out of bounds, reset
+        if self.current_position + B*T + 1 > len(self.tokens):
             self.current_position = 0
         return x,y
 # -------------------------------------------------------
@@ -227,12 +229,15 @@ elif torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 
 # get a databatch
-train_loader = DataLoaderLite(B=4,T=32)
+train_loader = DataLoaderLite(B=16,T=1024)
+# By default this is set to highest which basically means that even the simplest of matrix multiplications happen on float32 precision (24 mantissa bits 23 stored)
+# When we switch it to high we either use tensorfloat 32 (10 mantissa bits stored), consider a f32 as a sum of 2 bloat16 numbers or use faster matrix multi alogs
+torch.set_float32_matmul_precision('high')
 
 num_return_sequences = 5
 max_length = 30
 #model = GPT.from_pretrained('gpt2')
-# We can still run out model, but it'll give us garbage because it hasn't been trained yet
+
 model = GPT(GPTConfig())
 model.eval()
 model.to(device)
@@ -240,6 +245,7 @@ model.to(device)
 # optimization
 optimizer = torch.optim.AdamW(model.parameters(),lr=3e-4)
 for i in range(50):
+    t0 = time.time()
     x,y = train_loader.next_batch()
     x,y = x.to(device),y.to(device)
     optimizer.zero_grad()
@@ -247,7 +253,14 @@ for i in range(50):
     # print(f"Loss: {loss}")
     loss.backward()
     optimizer.step()
-    print(f"step {i}, loss: {loss.item()}")
+    # This function basically makes the program wait for GPU to finish all it's scheduled tasks
+    torch.cuda.synchronize()
+    # torch.mps.synchronize() 
+    t1 = time.time()
+    dt = (t1-t0)*1000 # time difference in milliseconds
+    # Tokens processed per second during training
+    tokens_per_sec = (train_loader.B * train_loader.T)/(t1-t0)
+    print(f"step {i}, loss: {loss.item()}, dt: {dt:.2f}ms, tokens/sec: {tokens_per_sec:.2f}")
 
 
 # enc = tiktoken.get_encoding('gpt2')

@@ -241,6 +241,15 @@ max_length = 30
 model = GPT(GPTConfig())
 model.eval()
 model.to(device)
+# PyTorch compile function increases the performance of the model by reading the code inside the model all at once.
+# Advantage 1:
+# Normally the python interpreter has to go line by line top read the code but when we're using torch.compile, it tries to analyse the kind of operations we're trying to run. 
+# Suppose, the ineterpreter will first start reading the forward function to analyse how the opreations are going to be carried out then that code is compiled and 
+# stored in a seperate object which the python interpreter doesn't reread thus making code execution optimized.
+# Advantage 2:
+# torch.compile() basically ensures that if one input is being used for calculation, that input is first stored in the HBM and then it's being used further for calculations.
+# when torch get's the overview of the code, it can decide how to optimize the communication time between the GPU chip and the HBM.
+model = torch.compile(model)
 
 # optimization
 optimizer = torch.optim.AdamW(model.parameters(),lr=3e-4)

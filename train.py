@@ -247,8 +247,8 @@ torch.set_float32_matmul_precision('high')
 num_return_sequences = 5
 max_length = 30
 #model = GPT.from_pretrained('gpt2')
-
-model = GPT(GPTConfig())
+# We have increased the vocab size to 50304 as it's a better number than 50257 as it's divisible with all powers of 2 upto 128 which makes it easier for GPU calculations.
+model = GPT(GPTConfig(vocab_size=50304))
 model.eval()
 model.to(device)
 # PyTorch compile function increases the performance of the model by reading the code inside the model all at once.

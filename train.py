@@ -249,7 +249,13 @@ for i in range(50):
     x,y = train_loader.next_batch()
     x,y = x.to(device),y.to(device)
     optimizer.zero_grad()
-    logits, loss = model(x,y)
+    # We are going to do mixed precision training here
+    # Some operations like matrix multiplication in the Linear Layers can be done with lower precision for increased performance.
+    # To faciliate certain operations to use automatic mixed precision we use torch.autocast. There is a list of operations which can be autocasted (check the docs)
+    # PyTorch documentation recommends us to only use this for training the model and loss calualation and we should leave optimzation and back propagation alone.
+    # We don't use flaot16 because if we use them we will have to scale the gradients using Gradient Scaling algos instead we're using bfloat16
+    with torch.autocast(device_type=device, dtype=torch.bfloat16):
+        logits, loss = model(x,y)
     # print(f"Loss: {loss}")
     loss.backward()
     optimizer.step()

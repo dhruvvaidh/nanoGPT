@@ -1,6 +1,6 @@
 # nanoGPT — GPT-2 (124M) from scratch
 
-A from-scratch reimplementation of GPT-2 small (124M parameters) in PyTorch, built step by step following Andrej Karpathy's nanoGPT / ["Let's reproduce GPT-2 (124M)"](https://www.youtube.com/watch?v=l8pRSuU81PU) walkthrough. It is a learning project: the long comments in the code are notes on *why* each piece exists, and are meant to be read alongside it.
+A from-scratch reimplementation of GPT-2 small (124M parameters) in PyTorch, built step by step. It is a learning project: the long comments in the code are notes on *why* each piece exists, and are meant to be read alongside it.
 
 The model was trained for one epoch of the FineWeb-Edu 10B-token sample (19,073 steps × ~0.5M tokens), reaching:
 
@@ -14,7 +14,7 @@ The model was trained for one epoch of the FineWeb-Edu 10B-token sample (19,073 
 | File | What it covers |
 |---|---|
 | `README.md` (this file) | Setup, data preparation, training, evaluation, outputs, configuration |
-| [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md) | The project built up commit by commit: what was added at each step, why, and the bugs found along the way |
+| [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md) | The project built up commit by commit: what was added at each step and why |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Reference for the current code: model shapes and parameter counts, data pipeline, anatomy of a training step, evals, DDP, gotchas |
 
 ## Repository layout
@@ -30,6 +30,7 @@ The model was trained for one epoch of the FineWeb-Edu 10B-token sample (19,073 
 │   ├── fineWeb/fineweb.py       # downloads + tokenizes FineWeb-Edu 10BT into 100M-token shards
 │   ├── hellaSwag/hellaswag.py   # downloads HellaSwag, renders examples, evaluates HF GPT-2 as a reference
 │   └── tiny_shakespeare/input.txt  # the original toy dataset (no longer used by train.py)
+├── docs/                        # BUILD_LOG.md, ARCHITECTURE.md, make_plots.py, images/
 ├── notebooks/walkthrough.ipynb  # exploration: HF GPT-2 weights, weight tying, init, grad accumulation, log plotting
 └── log/                         # created by training (gitignored): log.txt + model_NNNNN.pt checkpoints
 ```
@@ -125,7 +126,7 @@ Everything goes to `log/` (gitignored). Note that `log/log.txt` is **truncated a
 ...
 ```
 
-To plot it, use the last cell of `notebooks/walkthrough.ipynb`. Point its `open(...)` at `../log/log.txt` (it currently reads `log124M_40B/log.txt`). It draws train/val loss against the OpenAI GPT-2 baseline (3.2924), and HellaSwag accuracy against the GPT-2 and GPT-3 baselines.
+To plot it, run `python docs/make_plots.py` from the repo root. It writes `docs/images/training_curves.png`, using the plotting code from the last cell of `notebooks/walkthrough.ipynb`: train/val loss against the OpenAI GPT-2 baseline (3.2924), and HellaSwag accuracy against the GPT-2 and GPT-3 baselines. It also redraws `docs/images/lr_schedule.png` from `get_lr`. It only needs `numpy` and `matplotlib`.
 
 **`log/model_NNNNN.pt`** — written at steps 5000, 10000, 15000 and at the last step (19072). Each holds `{'model': state_dict, 'config': GPTConfig, 'step', 'val_loss'}`. There is no optimizer state or RNG state, so **training cannot be resumed** from a checkpoint.
 

@@ -1,6 +1,6 @@
 # Build log: how this project was built, step by step
 
-This is a chronological record of how the project went from an empty repo to a GPT-2 (124M) trained on 10B tokens. Each step lists the commit(s), what changed in the code, *why* (the concept behind it), and any bugs that came up. Commit hashes are short SHAs on `main`, so `git show <sha>` shows the exact diff.
+This is a chronological record of how the project went from an empty repo to a GPT-2 (124M) trained on 10B tokens. Each step lists the commit(s), what changed in the code, *why* (the concept behind it). Commit hashes are short SHAs on `main`, so `git show <sha>` shows the exact diff.
 
 For how the finished code fits together, see [`ARCHITECTURE.md`](ARCHITECTURE.md). For how to run it, see the [README](../README.md).
 
@@ -23,14 +23,12 @@ For how the finished code fits together, see [`ARCHITECTURE.md`](ARCHITECTURE.md
 | 12 | [Tuning 1: AdamW betas + gradient clipping](#step-12--tuning-1-adamw-betas--gradient-clipping) | `371ad9c` | Sep 20 |
 | 13 | [Tuning 2: LR schedule, weight decay, fused AdamW](#step-13--tuning-2-lr-schedule-weight-decay-fused-adamw) | `7b9be23` | Sep 20 |
 | 14 | [Gradient accumulation (0.5M-token batches)](#step-14--gradient-accumulation-05m-token-batches) | `3eb638a` | Sep 20 |
-| 15 | [Distributed Data Parallel (multi-GPU)](#step-15--distributed-data-parallel-multi-gpu) | `269cc7f`, `3fe0dde` | Sep 20 |
+| 15 | [Distributed Data Parallel (multi-GPU)](#step-15--distributed-data-parallel-multi-gpu) | `269cc7f` | Sep 20 |
 | 16 | [FineWeb-Edu 10B dataset](#step-16--fineweb-edu-10b-dataset) | `b6375a8` | Sep 20 |
 | 17 | [Validation split, logging, checkpoints](#step-17--validation-split-logging-checkpoints) | `b6375a8` | Sep 20 |
 | 18 | [HellaSwag evaluation](#step-18--hellaswag-evaluation) | `b6375a8` | Sep 20 |
 | 19 | [In-training sampling and the full run](#step-19--in-training-sampling-and-the-full-run) | `b6375a8` | Sep 20 |
 | 20 | [Modularize the codebase](#step-20--modularize-the-codebase) | `61c5075`, `642924a` | Sep 23–24 |
-
-Then: a [summary of the bugs found along the way](#bugs-found-along-the-way), and [what was different during the full training run](#what-the-full-run-actually-used).
 
 ---
 
@@ -95,8 +93,6 @@ class DataLoaderLite:
 
 It walks through the whole token stream (~338K tokens for Tiny Shakespeare) instead of reusing one batch.
 
-**Bug:** the end-of-data check was `if self.current_position > self.current_position + B*T + 1`, which is never true. So the loader would eventually run off the end of the data. It was fixed in Step 7.
-
 ### Step 5 — Weight tying
 
 **Commit:** `79bcb0c`
@@ -111,11 +107,9 @@ The token embedding (`wte`, maps id → vector) and the output classifier (`lm_h
 - Intuition: tokens that are semantically similar should be close in the input embedding *and* get similar output probabilities, so one matrix can serve both jobs.
 - It saves 50257 × 768 ≈ 38.6M parameters, about 30% of the 124M model.
 
-Also fixed a print that dumped the whole token list instead of `len(tokens)`.
-
 ### Step 6 — GPT-2 weight initialization
 
-**Commits:** `ccf1238`, `28cf555` (bug fix)
+**Commits:** `ccf1238`, `28cf555`
 
 `self.apply(self._init_weights)` walks every submodule:
 
@@ -128,8 +122,6 @@ Also fixed a print that dumped the whole token list instead of `len(tokens)`.
 The values come from OpenAI's GPT-2 code. 0.02 is in the same range as `1/sqrt(n_embd)` for GPT-2's model widths (0.036 at 768, 0.025 at 1600). The extra scaling for residual projections is from the GPT-2 paper. Every block adds its output to the residual stream twice (once from attention, once from the MLP), so with `n_layer` blocks there are `2·n_layer` additions. Each addition adds variance, so the standard deviation of the stream grows like `sqrt(N)`. Scaling each contribution by `N^-0.5` keeps it near 1. The notebook demonstrates this: summing 100 random vectors scaled by `100**-0.5` gives a std of ≈ 0.985 instead of ≈ 10.
 
 Also added seeding (`torch.manual_seed(1337)` plus the CUDA/MPS equivalents).
-
-**Bugs, fixed in `28cf555`:** `self.config.n_layers` → `n_layer` (the config field has no `s`), and `hasattr(torch.backends)` → `hasattr(torch.backends, 'mps')` (`hasattr` needs two arguments).
 
 (Linear biases were *not* zeroed here. That was added much later, in Step 20.)
 
@@ -154,7 +146,7 @@ torch.set_float32_matmul_precision('high')
 Also in this commit:
 - Micro-batch increased to `B=16, T=1024` (the real GPT-2 context length).
 - Timing: `t0`/`t1` around each step, plus **`torch.cuda.synchronize()`**. CUDA calls are asynchronous: Python queues the kernels and continues. Without the synchronize, you would measure how fast the CPU queues work, not how fast the GPU does it. (This unconditional CUDA call is why the loop doesn't run on Mac or CPU today.)
-- Fixed the `DataLoaderLite` wrap bug from Step 4: reset when `current_position + B*T + 1 > len(tokens)`.
+- `DataLoaderLite` wraps back to the start when the next batch would run past the end of the data (`current_position + B*T + 1 > len(tokens)`).
 
 ### Step 8 — Optimization 2: bfloat16 autocast
 
@@ -291,7 +283,7 @@ for micro_step in range(grad_accum_steps):
 
 ### Step 15 — Distributed Data Parallel (multi-GPU)
 
-**Commits:** `269cc7f`, `3fe0dde`
+**Commit:** `269cc7f`
 
 Launching with `torchrun --standalone --nproc_per_node=8 train.py` starts **8 copies** of the script, one per GPU, with `RANK`, `LOCAL_RANK` and `WORLD_SIZE` set as environment variables.
 
@@ -305,12 +297,6 @@ Launching with `torchrun --standalone --nproc_per_node=8 train.py` starts **8 co
 - `use_compile = False` was introduced, with compile placed *before* the DDP wrap.
 - `configure_optimizers` now uses `device_type.startswith("cuda")`, because under torchrun `device` is `'cuda:0'`, not `'cuda'`.
 - `destroy_process_group()` at the end.
-
-**Latent issues in this commit, fixed later:**
-1. `require_backward_grad_sync` was set **after** the forward pass. DDP reads the flag *inside* `forward()` to decide whether to arm its backward hooks, so it had no effect and gradients synced on every micro-step. That is wasted communication but still correct gradients. Fixed in Step 20.
-2. `torch.autocast(device_type=device)` received `'cuda:N'` under torchrun. Fixed in Step 16 with `device_type`.
-
-`3fe0dde` ("removing claude.md file") added `CLAUDE.md` to `.gitignore`. The file had already been committed, so it stayed tracked and the ignore entry has no effect.
 
 ---
 
@@ -393,30 +379,7 @@ By now `train.py` was 633 lines holding the model, the data loader, the eval hel
 
 **Behavior changes carried in:**
 - **Linear biases are zero-initialized** (`torch.nn.init.zeros_`), matching GPT-2. PyTorch's default is a small uniform init.
-- **`require_backward_grad_sync` is set *before* the forward pass**, fixing the Step 15 issue. Gradients now sync only on the last micro-step.
+- **`require_backward_grad_sync` is set *before* the forward pass.** DDP reads the flag inside `forward()` to decide whether to arm gradient sync for the backward, so this is what limits the all-reduce to the last micro-step.
 - `.gitignore` adds `log/`.
 
 It was verified with an end-to-end CPU run of `main()` using a 2-layer model and synthetic shards (data loading, accumulation, all three evals, checkpoint write/reload, and the log format). The DDP path was not exercised, because no GPU was available.
-
----
-
-## Bugs found along the way
-
-| Introduced | Bug | Effect | Fixed |
-|---|---|---|---|
-| `d19821f` (Step 4) | Wrap check compared `current_position` to itself + B·T + 1 | Loader would run past the end of the data | `2937a14` (Step 7) |
-| `ccf1238` (Step 6) | `config.n_layers` | `AttributeError` at init | `28cf555` |
-| `ccf1238` (Step 6) | `hasattr(torch.backends)` | `TypeError` | `28cf555` |
-| `bed9b91` (Step 8), exposed by DDP | `autocast(device_type=device)` with `device='cuda:N'` | autocast rejects `'cuda:0'` under torchrun | `b6375a8` (Step 16) |
-| `7b9be23` (Step 13) | `device_type == "cuda"` for fused AdamW | Would silently disable fused AdamW under DDP (`cuda:N`) | `269cc7f` (Step 15), the same commit that added DDP |
-| `269cc7f` (Step 15) | `require_backward_grad_sync` set after forward | Gradients all-reduced on every micro-step (slower, still correct) | `61c5075` (Step 20) |
-| `269cc7f` (Step 15) | `.gitignore`'d an already-tracked `CLAUDE.md` | Ignore entry has no effect | (still present, harmless) |
-
-## What the full run actually used
-
-The completed 19,073-step run (Step 19) was done with the code as of `b6375a8`, **before** Step 20. Compared with the current code:
-
-- Linear biases used PyTorch's default uniform init, not zeros.
-- Under DDP, gradients were all-reduced on every micro-step instead of only the last one. That cost speed, not correctness.
-
-Everything else (architecture, data, hyperparameters, evals, seeds, log format) is the same.

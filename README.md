@@ -6,8 +6,12 @@ The model was trained for one epoch of the FineWeb-Edu 10B-token sample (19,073 
 
 | Metric | This run | OpenAI GPT-2 124M (reference) |
 |---|---|---|
-| FineWeb-Edu val loss | ~3.40 | 3.2924 |
-| HellaSwag `acc_norm` (completion style, 10,042 val examples) | ~0.27 | 0.2955 (measured with `datasets/hellaSwag/hellaswag.py -m gpt2`) |
+| FineWeb-Edu val loss | 3.3984 (final step) | 3.2924 |
+| HellaSwag `acc_norm` (completion style, 10,042 val examples) | 0.2704 final, 0.2719 best | 0.2955 (measured with `datasets/hellaSwag/hellaswag.py -m gpt2`) |
+
+![Training curves: train/val loss and HellaSwag accuracy over 19,073 steps](docs/images/training_curves.png)
+
+*Generated from this run's `log/log.txt` by `python docs/make_plots.py`. The loss axis is log-scaled and cut off at 4.0, as in the notebook, so the first ~2,000 steps are above the top of the plot.*
 
 ## Documentation
 

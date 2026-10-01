@@ -350,7 +350,7 @@ Validation loss only tells you how well the model predicts FineWeb text. **Hella
 
 Every 250 steps (not step 0, and not when compiled), the model generates 4 continuations of `"Hello, I'm a language model,"` up to 32 tokens, using the same top-50 sampling as Step 1 and printing `rank {r} sample {i}: ...`. It uses its **own `torch.Generator` seeded with `42 + rank`**, so sampling doesn't consume the global RNG that training uses, and each rank produces different samples.
 
-**The run:** with all of this in place, the full 19,073-step run was done on a rented CUDA machine (Lambda) with `torchrun`. Final result: **val loss ≈ 3.40, HellaSwag `acc_norm` ≈ 0.27**. OpenAI's GPT-2 124M scores 3.29 val loss on this val shard and 0.2955 on HellaSwag with this script. `log/log.txt` and the `log/model_*.pt` checkpoints from the run are kept locally (gitignored).
+**The run:** with all of this in place, the full 19,073-step run was done on a rented CUDA machine (Lambda) with `torchrun`. Final result: **val loss 3.3984, HellaSwag `acc_norm` 0.2704** (best 0.2719). The curves are plotted in the [README](../README.md). OpenAI's GPT-2 124M scores 3.29 val loss on this val shard and 0.2955 on HellaSwag with this script. `log/log.txt` and the `log/model_*.pt` checkpoints from the run are kept locally (gitignored).
 
 ---
 

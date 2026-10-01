@@ -220,4 +220,4 @@ CLAUDE.md
 edu_fineweb10B/
 
 # Training output (checkpoints, logs)
-log/
+log/*.pt
